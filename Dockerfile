@@ -30,7 +30,8 @@ ARG VARNISH_MODULES_TAG=7.0
 ARG VMOD_RE_VERSION=7.0
 ARG VARNISH_EXPORTER_VERSION=1.6
 
-RUN apt-get update -qqy \
+RUN set -x; \
+  apt-get update -qqy \
   && apt-get install -qqy --no-install-recommends \
     $BUILD_DEPS \
   && curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 \
@@ -83,6 +84,7 @@ RUN apt-get update -qqy \
 # RUN ln -s "lg_dirty_mult:8,lg_chunk:18" /etc/malloc.conf
 
 COPY docker-entrypoint.sh /
+COPY varnish_reload_vcl.sh /usr/bin/varnish_reload_vcl
 
 EXPOSE 80 9131
 
