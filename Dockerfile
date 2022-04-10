@@ -42,6 +42,9 @@ RUN set -x; \
   && apt-get update -qq \
   && apt-get install -qqy \
     netbase \
+    iproute2 \
+    iputils-ping \
+    curl \
     varnish=${VARNISH_VERSION} \
     varnish-dev=${VARNISH_VERSION} \
   # install varnish-modules
