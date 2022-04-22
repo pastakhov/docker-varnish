@@ -11,7 +11,6 @@ ENV LC_ALL=C \
     VARNISH_STORAGE_FILE=/data/cache.bin
 
 ARG BUILD_DEPS=" \
-      curl \
       gnupg \
       ca-certificates \
       apt-transport-https \
@@ -34,6 +33,10 @@ RUN set -x; \
   apt-get update -qqy \
   && apt-get install -qqy --no-install-recommends \
     $BUILD_DEPS \
+    netbase \
+    iproute2 \
+    iputils-ping \
+    curl \
   && curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 \
   && chmod +x /usr/local/bin/dumb-init \
   && curl -L https://packagecloud.io/varnishcache/varnish70/gpgkey | apt-key add - \
@@ -41,10 +44,6 @@ RUN set -x; \
   && echo "deb-src https://packagecloud.io/varnishcache/varnish70/ubuntu/ focal main " >> /etc/apt/sources.list.d/varnish.list \
   && apt-get update -qq \
   && apt-get install -qqy \
-    netbase \
-    iproute2 \
-    iputils-ping \
-    curl \
     varnish=${VARNISH_VERSION} \
     varnish-dev=${VARNISH_VERSION} \
   # install varnish-modules
