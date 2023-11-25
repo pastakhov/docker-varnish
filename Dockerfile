@@ -6,9 +6,12 @@ LABEL maintainer="Pavel Astakhov <pastakhov@yandex.ru>"
 ENV LC_ALL=C \
     DEBIAN_FRONTEND=noninteractive \
     VARNISH_CONFIG=/etc/varnish/default.vcl \
+    VARNISH_SECRET=/etc/varnish/secret \
     VARNISH_SIZE=100M \
     VARNISH_STORAGE_KIND=malloc \
-    VARNISH_STORAGE_FILE=/data/cache.bin
+    VARNISH_STORAGE_FILE=/data/cache.bin \
+    LOG_FILES_COMPRESS_DELAY=3600 \
+    LOG_FILES_REMOVE_OLDER_THAN_DAYS=10
 
 ARG BUILD_DEPS=" \
       gnupg \
@@ -39,6 +42,9 @@ RUN set -x; \
     iputils-tracepath \
     traceroute \
     curl \
+    apache2-utils \
+    zip \
+    netcat-openbsd \
   && curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 \
   && chmod +x /usr/local/bin/dumb-init \
   && curl -L https://packagecloud.io/varnishcache/varnish70/gpgkey | apt-key add - \
@@ -87,7 +93,7 @@ RUN set -x; \
 
 # RUN ln -s "lg_dirty_mult:8,lg_chunk:18" /etc/malloc.conf
 
-COPY docker-entrypoint.sh /
+COPY docker-entrypoint.sh rotatelogs-compress.sh /
 COPY varnish_reload_vcl.sh /usr/bin/varnish_reload_vcl
 
 EXPOSE 80 9131
