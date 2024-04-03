@@ -17,9 +17,16 @@ if [ -z "$VARNISH_STORAGE_SPECIFICATION" ]; then
 fi
 
 CMD_ARGS=("-F" "-P" "/var/run/varnishd.pid" "-f" "$VARNISH_CONFIG" "-s" "$VARNISH_STORAGE_SPECIFICATION")
+if [ "$VARNISH_LOG_FORMAT" == "X-Forwarded-For" ]; then
+    VARNISH_LOG_FORMAT='%{X-Forwarded-For}i %l %u %t "%r" %s %b "%{Referer}i" "%{User-agent}i"'
+elif [ "$VARNISH_LOG_FORMAT" == "X-Real-IP" ]; then
+    VARNISH_LOG_FORMAT='%{X-Real-IP}i %l %u %t "%r" %s %b "%{Referer}i" "%{User-agent}i"'
+else
+    VARNISH_LOG_FORMAT=${VARNISH_LOG_FORMAT:-'%h %l %u %t "%r" %s %b "%{Referer}i" "%{User-agent}i"'}
+fi
 
 if [ -n "$VARNISH_LOG_DIR" ]; then
-    (wait_varnish && varnishncsa | /usr/bin/rotatelogs -c -f -l -p /rotatelogs-compress.sh -L "$VARNISH_LOG_DIR/access_log.current" "$VARNISH_LOG_DIR/access_log_%Y%m%d" 86400) &
+    (wait_varnish && varnishncsa -F "$VARNISH_LOG_FORMAT" | /usr/bin/rotatelogs -c -f -l -p /rotatelogs-compress.sh -L "$VARNISH_LOG_DIR/access_log.current" "$VARNISH_LOG_DIR/access_log_%Y%m%d" 86400) &
 fi
 
 if [ -f "$VARNISH_SECRET" ]; then
