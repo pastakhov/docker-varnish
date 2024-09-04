@@ -42,9 +42,8 @@ RUN set -x; \
     iputils-tracepath \
     traceroute \
     curl \
-    apache2-utils \
-    zip \
     netcat-openbsd \
+    python3 \
   && curl -L -o /usr/local/bin/dumb-init https://github.com/Yelp/dumb-init/releases/download/v${DUMB_INIT_VERSION}/dumb-init_${DUMB_INIT_VERSION}_amd64 \
   && chmod +x /usr/local/bin/dumb-init \
   && curl -L https://packagecloud.io/varnishcache/varnish70/gpgkey | apt-key add - \
@@ -93,8 +92,11 @@ RUN set -x; \
 
 # RUN ln -s "lg_dirty_mult:8,lg_chunk:18" /etc/malloc.conf
 
-COPY docker-entrypoint.sh rotatelogs-compress.sh /
+COPY docker-entrypoint.sh /
 COPY varnish_reload_vcl.sh /usr/bin/varnish_reload_vcl
+COPY varnishncsa_sighup.sh /usr/bin/varnishncsa_sighup
+COPY import_logs_matomo.sh /usr/bin/import_logs_matomo
+COPY compress_old_logs.sh /usr/bin/compress_old_logs
 
 EXPOSE 80 9131
 

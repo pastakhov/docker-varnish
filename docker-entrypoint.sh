@@ -7,6 +7,8 @@ wait_varnish() {
     sleep 1
 }
 
+rm /var/run/varnishd.pid /var/run/varnishncsa.pid
+
 if [ -z "$VARNISH_STORAGE_SPECIFICATION" ]; then
     if [ "$VARNISH_STORAGE_KIND" == "file" ]; then
         chown vcache "$VARNISH_STORAGE_FILE"
@@ -26,7 +28,7 @@ else
 fi
 
 if [ -n "$VARNISH_LOG_DIR" ]; then
-    (wait_varnish && varnishncsa -F "$VARNISH_LOG_FORMAT" | /usr/bin/rotatelogs -c -f -l -p /rotatelogs-compress.sh -L "$VARNISH_LOG_DIR/access_log.current" "$VARNISH_LOG_DIR/access_log_%Y%m%d" 86400) &
+    (wait_varnish && varnishncsa -F "$VARNISH_LOG_FORMAT" -P /var/run/varnishncsa.pid -a -w "$VARNISH_LOG_DIR/access_log" -D) &
 fi
 
 if [ -f "$VARNISH_SECRET" ]; then
