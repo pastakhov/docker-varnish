@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DELAY=${1:0}
+DELAY=${1:-0}
 
 if (( DELAY > 0 )); then
     echo "Wait for $DELAY seconds before compressing old log files"

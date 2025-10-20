@@ -67,7 +67,7 @@ if [ "$varnish_log_file" != "access_log" ]; then
 
     # remove old log files
     if [ -n "$LOG_FILES_REMOVE_OLDER_THAN_DAYS" ] && [ "$LOG_FILES_REMOVE_OLDER_THAN_DAYS" != false ]; then
-        find "${VARNISH_LOG_DIR}" -type f -mtime "+$LOG_FILES_REMOVE_OLDER_THAN_DAYS" -iname "$varnish_log_file*" ! -iname ".*" ! -iname "access_log" -exec rm -f {} \;
+        find "${VARNISH_LOG_DIR}" -type f -mtime "+$LOG_FILES_REMOVE_OLDER_THAN_DAYS" -iname "access_log_*" ! -iname "$varnish_log_file*" -exec rm -f {} \;
     fi
 
     compress_old_logs "$DELAY" "$varnish_log_file" &
