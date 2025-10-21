@@ -95,7 +95,7 @@ Notes:
 - `MATOMO_PASSWORD` (required for Matomo import): Can also be read from `/run/secrets/matomo_password`
 - `MATOMO_URL` (default: `http://matomo`): Base URL for Matomo API used by importer
 - `LOG_FILES_COMPRESS_DELAY` (default: `3600`): Upper bound for random delay (seconds) before compressing rotated logs; `0` disables delay
-- `LOG_FILES_REMOVE_OLDER_THAN_DAYS` (default: `10`): Remove old processed log files matching the rotated name pattern after N days
+- `LOG_FILES_REMOVE_OLDER_THAN_DAYS` (default: `10`): Remove archived gzip files (`access_log_*.gz`) older than N days; set to `false` to disable
 
 Storage notes:
 
@@ -128,8 +128,8 @@ At container start:
 
 - `varnish_reload_vcl`: Hot-loads the VCL specified by `VARNISH_CONFIG` and activates it via `varnishadm`
 - `varnishncsa_sighup`: Sends `SIGHUP` to `varnishncsa` to reopen the log file after rotation
-- `import_logs_matomo`: Rotates yesterday's access log if needed, runs Matomo's Python importer, then compresses and cleans old logs
-- `compress_old_logs [delay] [skip_file]`: Compresses old uncompressed log files in `VARNISH_LOG_DIR` (internal helper)
+- `import_logs_matomo`: Rotates current `access_log` if older than a day, imports it, lock-processes older backlog, renames imported files to `*_imported`, then triggers background compression and cleanup
+- `compress_old_logs [delay]`: Compresses `*_imported` files to `.gz` (removes `_imported` suffix) using a lock to prevent concurrent runs
 
 Examples:
 
@@ -143,8 +143,12 @@ Matomo import details:
 
 - Uses Matomo's `misc/log-analytics/import_logs.py` from the mounted Matomo directory (`/var/www/html`).
 - Imports into site ID `1` with `--recorders=4` by default.
-- If the current `access_log` contains only yesterday's date, it is rotated to `access_log_YYYYMMDD` and `varnishncsa` is signaled to reopen the file.
-- After import, a background job compresses old logs and removes rotated files older than `LOG_FILES_REMOVE_OLDER_THAN_DAYS`.
+- If the current `access_log` is missing, the importer sends `SIGHUP` to `varnishncsa` to start/reopen logging and exits.
+- If the first entry in `access_log` is older than one day, it is rotated to `access_log_YYYYMMDD` and `varnishncsa` is signaled (`SIGHUP`) to reopen the file.
+- After a successful import, processed rotated files are renamed to `*_imported` and a background job compresses all `*_imported` files to `.gz` (dropping the `_imported` suffix).
+- Older not-yet-imported files matching `access_log_YYYYMMDD` are discovered and imported under a lock to prevent concurrent runs; on success they are renamed to `*_imported`.
+- Archived gzip files may be cleaned up based on `LOG_FILES_REMOVE_OLDER_THAN_DAYS` (positive integer), or retained if set to `false`.
+- Lock files used: `.import_lock` for backlog importing and `.compress_lock` for compression to avoid concurrent executions.
 
 ---
 
