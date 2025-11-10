@@ -47,17 +47,18 @@ else
     varnish_log_file="access_log"
 fi
 
-# Run logs parser using Python 3
+# Run logs parser using Python 3 (capture output to analyze failures)
 echo "Importing log file: $varnish_log_file"
+IMPORT_TMP_OUTPUT=$(mktemp)
 python3 /var/www/html/misc/log-analytics/import_logs.py \
   --url="$MATOMO_URL" \
   --login="$MATOMO_USER" \
   --password="$MATOMO_PASSWORD" \
   --idsite=1 \
   --recorders=4 \
-  "$VARNISH_LOG_DIR/$varnish_log_file"
+  "$VARNISH_LOG_DIR/$varnish_log_file" 2>&1 | tee "$IMPORT_TMP_OUTPUT"
 
-import_exit_code=$?
+import_exit_code=${PIPESTATUS[0]}
 
 # Treat exit code 0 as success for any file; rename only when not the live access_log
 if [ "$import_exit_code" -eq 0 ]; then
@@ -68,8 +69,24 @@ if [ "$import_exit_code" -eq 0 ]; then
         echo "Import successful for $varnish_log_file"
     fi
 else
-    echo "Import failed with exit code $import_exit_code for file $varnish_log_file"
+    if grep -qi "cannot automatically determine the log format" "$IMPORT_TMP_OUTPUT"; then
+        if [ "$varnish_log_file" != "access_log" ]; then
+            echo "Detected unrecognized log format. Marking $varnish_log_file as bad format."
+            mv "${VARNISH_LOG_DIR}/$varnish_log_file" "${VARNISH_LOG_DIR}/${varnish_log_file}_bad_format"
+        fi
+    else
+        echo "Import failed with exit code $import_exit_code for file $varnish_log_file"
+        # Check if file contains only CONNECT requests
+        if [ "$varnish_log_file" != "access_log" ] && [ -f "${VARNISH_LOG_DIR}/$varnish_log_file" ]; then
+            non_connect_lines=$(grep -v -c "CONNECT" "${VARNISH_LOG_DIR}/$varnish_log_file" 2>/dev/null | tr -d '\n' || echo 0)
+            if [ "$non_connect_lines" -eq 0 ] && [ -s "${VARNISH_LOG_DIR}/$varnish_log_file" ]; then
+                echo "All lines in the log file are CONNECT requests that cannot be imported. Marking $varnish_log_file as bad format."
+                mv "${VARNISH_LOG_DIR}/$varnish_log_file" "${VARNISH_LOG_DIR}/${varnish_log_file}_bad_format"
+            fi
+        fi
+    fi
 fi
+rm -f "$IMPORT_TMP_OUTPUT"
 
 # Process old not-yet-imported files with lock protection
 LOCK_FILE="${VARNISH_LOG_DIR}/.import_lock"
@@ -97,31 +114,50 @@ if [ -f "$LOCK_FILE" ] && [ "$(cat "$LOCK_FILE")" = "$$" ]; then
     echo "Searching for old files to process..."
     file_count=0
 
-    find "${VARNISH_LOG_DIR}" -type f -name "access_log_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" ! -name "*_imported" ! -name "*.gz" ! -name "*.tar.gz" -print0 | while IFS= read -r -d '' old_file; do
+    while IFS= read -r -d '' old_file; do
         filename=$(basename "$old_file")
         echo "Processing old file: $filename"
         ((file_count++))
 
-        # Import the old file
+        # Import the old file (capture output to analyze failures)
+        OLD_IMPORT_TMP_OUTPUT=$(mktemp)
         python3 /var/www/html/misc/log-analytics/import_logs.py \
           --url="$MATOMO_URL" \
           --login="$MATOMO_USER" \
           --password="$MATOMO_PASSWORD" \
           --idsite=1 \
           --recorders=4 \
-          "$old_file"
+          "$old_file" 2>&1 | tee "$OLD_IMPORT_TMP_OUTPUT"
 
-        old_import_exit_code=$?
+        old_import_exit_code=${PIPESTATUS[0]}
 
         if [ "$old_import_exit_code" -eq 0 ]; then
             echo "Old file import successful, renaming $filename to ${filename}_imported"
             mv "$old_file" "${old_file}_imported"
         else
-            echo "Old file import failed with exit code $old_import_exit_code for $filename, stopping processing"
-            rm -f "$LOCK_FILE"
-            exit $old_import_exit_code
+            if grep -qi "cannot automatically determine the log format" "$OLD_IMPORT_TMP_OUTPUT"; then
+                echo "Detected unrecognized log format. Marking $filename as bad format and continuing."
+                mv "$old_file" "${old_file}_bad_format"
+            else
+                echo "Old file import failed with exit code $old_import_exit_code for $filename"
+                # Check if file contains only CONNECT requests
+                if [ -f "$old_file" ]; then
+                    non_connect_lines=$(grep -v -c "CONNECT" "$old_file" 2>/dev/null | tr -d '\n' || echo 0)
+                    if [ "$non_connect_lines" -eq 0 ] && [ -s "$old_file" ]; then
+                        echo "All lines in the log file are CONNECT requests that cannot be imported. Marking $filename as bad format and continuing."
+                        mv "$old_file" "${old_file}_bad_format"
+                        rm -f "$OLD_IMPORT_TMP_OUTPUT"
+                        continue
+                    fi
+                fi
+                echo "Stopping processing due to import failure"
+                rm -f "$LOCK_FILE"
+                rm -f "$OLD_IMPORT_TMP_OUTPUT"
+                exit "$old_import_exit_code"
+            fi
         fi
-    done
+        rm -f "$OLD_IMPORT_TMP_OUTPUT"
+    done < <(find "${VARNISH_LOG_DIR}" -type f -name "access_log_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]" ! -name "*_imported" ! -name "*_bad_format" ! -name "*.gz" ! -name "*.tar.gz" -print0)
 
     if [ "$file_count" -eq 0 ]; then
         echo "No old files found to process"
@@ -159,11 +195,11 @@ if [ -n "$LOG_FILES_REMOVE_OLDER_THAN_DAYS" ] && [ "$LOG_FILES_REMOVE_OLDER_THAN
     fi
 fi
 
-# Check for any uncompressed *_imported files before starting background compressor
-if find "${VARNISH_LOG_DIR}" -type f -name "*_imported" ! -name "*.gz" ! -name "*.tar.gz" -print -quit | grep -q .; then
-    echo "Found _imported files; scheduling background compression with delay: $DELAY seconds..."
+# Check for any uncompressed *_imported or *_bad_format files before starting background compressor
+if find "${VARNISH_LOG_DIR}" -type f \( -name "*_imported" -o -name "*_bad_format" \) ! -name "*.gz" ! -name "*.tar.gz" -print -quit | grep -q .; then
+    echo "Found files to compress; scheduling background compression with delay: $DELAY seconds..."
     # Use nohup to ignore SIGHUP from cron, and redirect to container logs
     nohup compress_old_logs "$DELAY" >> /proc/1/fd/1 2>> /proc/1/fd/2 &
 else
-    echo "No _imported files to compress; skipping background compression"
+    echo "No files to compress; skipping background compression"
 fi

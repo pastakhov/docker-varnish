@@ -128,8 +128,8 @@ At container start:
 
 - `varnish_reload_vcl`: Hot-loads the VCL specified by `VARNISH_CONFIG` and activates it via `varnishadm`
 - `varnishncsa_sighup`: Sends `SIGHUP` to `varnishncsa` to reopen the log file after rotation
-- `import_logs_matomo`: Rotates current `access_log` if older than a day, imports it, lock-processes older backlog, renames imported files to `*_imported`, then triggers background compression and cleanup
-- `compress_old_logs [delay]`: Compresses `*_imported` files to `.gz` (removes `_imported` suffix) using a lock to prevent concurrent runs
+- `import_logs_matomo`: Rotates current `access_log` if older than a day, imports it, lock-processes older backlog, renames imported files to `*_imported`, marks files with unrecognized format as `*_bad_format`, then (when needed) triggers a background compression job and cleanup
+- `compress_old_logs [delay]`: Compresses `*_imported` and `*_bad_format` files to `.gz` using a lock to prevent concurrent runs; removes `_imported` from the resulting filename but keeps `_bad_format` (e.g., `access_log_20250118_imported` → `access_log_20250118.gz`, `access_log_20250118_bad_format` → `access_log_20250118_bad_format.gz`)
 
 Examples:
 
@@ -145,8 +145,9 @@ Matomo import details:
 - Imports into site ID `1` with `--recorders=4` by default.
 - If the current `access_log` is missing, the importer sends `SIGHUP` to `varnishncsa` to start/reopen logging and exits.
 - If the first entry in `access_log` is older than one day, it is rotated to `access_log_YYYYMMDD` and `varnishncsa` is signaled (`SIGHUP`) to reopen the file.
-- After a successful import, processed rotated files are renamed to `*_imported` and a background job compresses all `*_imported` files to `.gz` (dropping the `_imported` suffix).
-- Older not-yet-imported files matching `access_log_YYYYMMDD` are discovered and imported under a lock to prevent concurrent runs; on success they are renamed to `*_imported`.
+- Import output is streamed (tee) and analyzed; if Matomo reports "cannot automatically determine the log format", the file is marked `*_bad_format` (instead of retrying indefinitely).
+- After a successful import, processed rotated files are renamed to `*_imported`. A background compression job is scheduled only when there are uncompressed `*_imported` or `*_bad_format` files. The job is started with `nohup` and its output is redirected to the container logs.
+- Older not-yet-imported files matching `access_log_YYYYMMDD` are discovered and imported under a lock to prevent concurrent runs; on success they are renamed to `*_imported`, and on unrecognized format they are renamed to `*_bad_format`.
 - Archived gzip files may be cleaned up based on `LOG_FILES_REMOVE_OLDER_THAN_DAYS` (positive integer), or retained if set to `false`.
 - Lock files used: `.import_lock` for backlog importing and `.compress_lock` for compression to avoid concurrent executions.
 
